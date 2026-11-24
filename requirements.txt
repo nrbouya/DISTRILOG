@@ -5,3 +5,4 @@ httpx
 pika 
 tenacity 
 pybreaker
+psycopg[binary]

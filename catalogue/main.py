@@ -1,41 +1,12 @@
-'''
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-
-app = FastAPI(title="catalogue")
-
-PRODUITS = {}
-
-class ProduitIn(BaseModel): 
-    sku: str
-    nom: str
-    prix: float
-
-@app.post("/produits", status_code=201)
-def creer_produit(p: ProduitIn):
-    if p.sku in PRODUITS:
-        raise HTTPException(status_code=409, detail="Ce SKU existe déjà")
-    PRODUITS[p.sku] = p.model_dump()
-    return PRODUITS[p.sku]
-
-@app.get("/produits")
-def lister_produits(): 
-    return list(PRODUITS.values())
-
-@app.get("/produits/{sku}") 
-def lire_produit(sku: str):
-    if sku not in PRODUITS:
-        raise HTTPException(status_code=404, detail="Produit introuvable")
-    return PRODUITS[sku]
-'''
+import os
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column 
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-engine = create_engine("sqlite:///catalogue.db")
+engine = create_engine(os.environ.get("DATABASE_URL", "sqlite:///catalogue.db"))
 
 class Base(DeclarativeBase):
     pass
@@ -54,6 +25,10 @@ app = FastAPI(title="catalogue")
 
 class ProduitIn(BaseModel):
     sku: str
+    nom: str
+    prix: float
+
+class ProduitMaj(BaseModel):
     nom: str
     prix: float
 
@@ -82,3 +57,15 @@ def lire_produit(sku: str):
         if p is None:
             raise HTTPException(status_code=404, detail="Produit introuvable")
         return en_dict(p)
+
+# AJOUT : modifier un produit
+@app.put("/produits/{sku}")
+def modifier_produit(sku: str, p: ProduitMaj):
+    with Session(engine) as db:
+        produit = db.get(Produit, sku)
+        if produit is None:
+            raise HTTPException(status_code=404, detail="Produit introuvable")
+        produit.nom = p.nom
+        produit.prix = p.prix
+        db.commit()
+        return en_dict(produit)
