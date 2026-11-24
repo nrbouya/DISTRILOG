@@ -1,0 +1,32 @@
+services:
+  catalogue:
+    build:
+      context: .
+      args:
+        SERVICE: catalogue
+    ports:
+      - "8001:8000"
+
+  stock:
+    build:
+      context: .
+      args:
+        SERVICE: stock
+    ports:
+      - "8002:8000"
+
+  commande:
+    build:
+      context: .
+      args:
+        SERVICE: commande
+    ports:
+      - "8003:8000"
+
+  livraison:
+    build:
+      context: .
+      args:
+        SERVICE: livraison
+    ports:
+      - "8004:8000"
