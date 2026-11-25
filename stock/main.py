@@ -57,22 +57,17 @@ def definir_stock(sku: str, q: Quantite):
 def liberer_stock(sku: str, q: Quantite):
 
     with Session(engine) as db:
-        with Session(engine) as db:
-            resultat = db.execute(
-                update(LigneStock)
-                .where(
-                    LigneStock.sku == sku
-                )
-                .values(
-                    quantite=LigneStock.quantite + q.quantite
-                )
+        resultat = db.execute(
+            update(LigneStock)
+            .where(LigneStock.sku == sku)
+            .values(quantite=LigneStock.quantite + q.quantite)
+        )
+        db.commit()
+        if resultat.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="SKU inconnu"
             )
-            db.commit()
-            if resultat.rowcount == 0:
-                raise HTTPException(
-                    status_code=404,
-                    detail="SKU inconnu"
-                )
     return {"sku": sku, "libere": q.quantite}
 # 8. Lire le stock d'un produit
 @app.get("/stock/{sku}")
