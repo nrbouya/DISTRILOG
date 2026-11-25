@@ -84,7 +84,6 @@ def lister_livraisons():
     with Session(engine) as db:
         return [en_dict(b) for b in db.scalars(select(BonLivraison))]
 
-# AJOUT : changer le statut d'une livraison (expediee, livree...)
 @app.put("/livraisons/{commande_id}")
 def modifier_statut(commande_id: int, s: StatutIn):
     with Session(engine) as db:

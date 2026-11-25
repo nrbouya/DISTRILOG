@@ -58,7 +58,7 @@ def lire_produit(sku: str):
             raise HTTPException(status_code=404, detail="Produit introuvable")
         return en_dict(p)
 
-# AJOUT : modifier un produit
+
 @app.put("/produits/{sku}")
 def modifier_produit(sku: str, p: ProduitMaj):
     with Session(engine) as db:

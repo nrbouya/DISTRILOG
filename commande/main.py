@@ -99,8 +99,7 @@ def passer_commande(c: CommandeIn):
     if rep.status_code == 404:
         raise HTTPException(status_code=404, detail="Produit inconnu")
     produit = rep.json()
-
-    # 2. Reste-t-il du stock ? (on demande au Stock, protégé par le disjoncteur)
+    
     try:
         rep = reserver_stock(c.sku, c.quantite)
     except (httpx.TransportError, pybreaker.CircuitBreakerError):
@@ -121,7 +120,7 @@ def passer_commande(c: CommandeIn):
         db.refresh(cmd)
         resultat = en_dict(cmd)
 
-    # 4. On PRÉVIENT les autres, sans les attendre
+
     publier_evenement(
         {
             "event_id": str(uuid.uuid4()),
@@ -137,7 +136,6 @@ def lister_commandes():
     with Session(engine) as db:
         return [en_dict(c) for c in db.scalars(select(Commande))]
 
-# AJOUT : changer le statut d'une commande (payee, annulee...)
 @app.put("/commandes/{commande_id}")
 def modifier_statut(commande_id: int, s: StatutIn):
     with Session(engine) as db:
