@@ -65,6 +65,19 @@ def reserver_stock(sku: str, quantite: int):
     )
 
 
+# Compensation : rendre le stock si la commande n'a pas pu être enregistrée
+def liberer_stock(sku: str, quantite: int):
+    try:
+        rep = appeler(
+            "POST",
+            f"{STOCK_URL}/stock/{sku}/liberer",
+            json={"quantite": quantite}
+        )
+        print(f"Compensation {sku} x{quantite} : code {rep.status_code}")
+    except httpx.RequestError as e:
+        print(f"Compensation impossible : {quantite} x {sku} non rendus ({e})")
+
+
 # Base de données
 class Base(DeclarativeBase):
     pass
@@ -116,7 +129,6 @@ def publier_evenement(evenement: dict):
 
     except Exception as e:
         print(f"Erreur lors de la publication de l'événement : {e!r}")
-    return canal
 
 
 @app.post("/commandes", status_code=201)
@@ -161,64 +173,43 @@ def passer_commande(c: CommandeIn):
         )
 
     rep.raise_for_status()
-    # rendre le stock si la commade n'a pas pu être enregistrée dans la base de données
-    # Compensation : rendre le stock si la commande n'a pas pu être enregistrée
-def liberer_stock(sku: str, quantite: int):
-    try:
-        rep = appeler(
-            "POST",
-            f"{STOCK_URL}/stock/{sku}/liberer",
-            json={"quantite": quantite}
-        )
-        print(f"Compensation {sku} x{quantite} : code {rep.status_code}")
-    except httpx.RequestError as e:
-        print(f"Compensation impossible : {quantite} x {sku} non rendus ({e})")
-    # 3. Enregistrer la commande
-    # with Session(engine) as db:
 
-    #     cmd = Commande(
-    #         sku=c.sku,
-    #         quantite=c.quantite,
-    #         total=produit["prix"] * c.quantite
-    #     )
-
-    #     db.add(cmd)
-    #     db.commit()
-    #     db.refresh(cmd)
+    # 3. Enregistrer la commande (si ça plante : compensation, on rend le stock)
     try:
         with Session(engine) as db:
-
             cmd = Commande(
                 sku=c.sku,
                 quantite=c.quantite,
                 total=produit["prix"] * c.quantite
             )
-
             db.add(cmd)
             db.commit()
             db.refresh(cmd)
-            resultat= {"id": cmd.id, "sku": cmd.sku, "quantite": cmd.quantite, "total": cmd.total}
+
+            resultat = {
+                "id": cmd.id,
+                "sku": cmd.sku,
+                "quantite": cmd.quantite,
+                "total": cmd.total
+            }
+
     except Exception as e:
+        print(f"Enregistrement impossible : {e}")
         liberer_stock(c.sku, c.quantite)
         raise HTTPException(
             status_code=500,
             detail="Erreur lors de l'enregistrement de la commande"
         )
 
-     # 4. Publier l'événement
+    # 4. Publier l'événement (seulement si la commande est enregistrée)
     publier_evenement({
-            "event_id": str(uuid.uuid4()),
-            "commande_id": cmd.id,
-            "sku": cmd.sku,
-            "quantite": cmd.quantite
-        })
+        "event_id": str(uuid.uuid4()),
+        "commande_id": resultat["id"],
+        "sku": resultat["sku"],
+        "quantite": resultat["quantite"]
+    })
 
-    return {
-            "id": cmd.id,
-            "sku": cmd.sku,
-            "quantite": cmd.quantite,
-            "total": cmd.total
-        }
+    return resultat
 
 
 @app.get("/commandes")
