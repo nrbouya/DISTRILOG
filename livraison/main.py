@@ -5,63 +5,59 @@ import time
 from contextlib import asynccontextmanager
 
 import pika
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-# Adresses : noms des services dans Docker, localhost en local
 RABBIT_HOST = os.environ.get("RABBIT_HOST", "localhost")
-engine = create_engine(
-    os.environ.get("DATABASE_URL", "sqlite:///livraison.db")
-)
-
+engine = create_engine(os.environ.get("DATABASE_URL", "sqlite:///livraison.db"))
 
 class Base(DeclarativeBase):
     pass
 
-
 class BonLivraison(Base):
     __tablename__ = "bons"
-    event_id: Mapped[str] = mapped_column(primary_key=True)
+    event_id: Mapped[str] = mapped_column(primary_key=True)  # clé unique = pas de doublon
     commande_id: Mapped[int]
     sku: Mapped[str]
     quantite: Mapped[int]
-
+    statut: Mapped[str] = mapped_column(default="en_preparation")  # AJOUT
 
 Base.metadata.create_all(engine)
 
 
-# Traiter un message : event_id en clé primaire = pas de doublon (idempotence)
 def traiter(corps: bytes):
     evenement = json.loads(corps)
     with Session(engine) as db:
-        db.add(BonLivraison(
-            event_id=evenement["event_id"],
-            commande_id=evenement["commande_id"],
-            sku=evenement["sku"],
-            quantite=evenement["quantite"],
-        ))
+        db.add(
+            BonLivraison(
+                event_id=evenement["event_id"],
+                commande_id=evenement["commande_id"],
+                sku=evenement["sku"],
+                quantite=evenement["quantite"],
+            )
+        )
         try:
             db.commit()
-            print("Bon créé pour la commande", evenement["commande_id"])
+            print("Bon créé pour la commande", evenement["commande_id"], flush=True)
         except IntegrityError:
-            db.rollback()
-            print("Message déjà traité, on l'ignore")
+            print("Message déjà traité, on l'ignore", flush=True)
 
+def au_message(ch, method, properties, body):
+    traiter(body)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
 
-# Écouter la file RabbitMQ (réessaie si RabbitMQ n'est pas encore prêt)
 def ecouter():
+    # MODIFIÉ : si RabbitMQ n'est pas prêt (ou tombe), on réessaie toutes les 3 s
+    # au lieu d'abandonner. C'était la cause du message perdu au démarrage.
     while True:
         try:
-            connexion = pika.BlockingConnection(
-                pika.ConnectionParameters(RABBIT_HOST)
-            )
+            connexion = pika.BlockingConnection(pika.ConnectionParameters(RABBIT_HOST))
             canal = connexion.channel()
             canal.exchange_declare(
-                exchange="distrilog.events",
-                exchange_type="topic",
-                durable=True
+                exchange="distrilog.events", exchange_type="topic", durable=True
             )
             canal.queue_declare(queue="livraison.commandes", durable=True)
             canal.queue_bind(
@@ -69,21 +65,12 @@ def ecouter():
                 exchange="distrilog.events",
                 routing_key="commande.passee",
             )
-
-            def au_message(ch, method, properties, body):
-                traiter(body)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-
-            canal.basic_consume(
-                queue="livraison.commandes",
-                on_message_callback=au_message
-            )
-            print("Livraison écoute la file livraison.commandes")
+            canal.basic_consume(queue="livraison.commandes", on_message_callback=au_message)
+            print("Livraison : connectée à RabbitMQ, en écoute", flush=True)
             canal.start_consuming()
         except Exception as erreur:
-            print("RabbitMQ indisponible, nouvel essai dans 3 s :", erreur)
+            print("Livraison : RabbitMQ indisponible, nouvel essai dans 3 s :", type(erreur).__name__, flush=True)
             time.sleep(3)
-
 
 @asynccontextmanager
 async def demarrage(app):
@@ -94,10 +81,25 @@ async def demarrage(app):
 app = FastAPI(title="livraison", lifespan=demarrage)
 
 
+class StatutIn(BaseModel):  # AJOUT
+    statut: str
+
+def en_dict(b: BonLivraison) -> dict:
+    return {"commande_id": b.commande_id, "sku": b.sku, "quantite": b.quantite, "statut": b.statut}
+
 @app.get("/livraisons")
 def lister_livraisons():
     with Session(engine) as db:
-        return [
-            {"commande_id": b.commande_id, "sku": b.sku, "quantite": b.quantite}
-            for b in db.scalars(select(BonLivraison))
-        ]
+        return [en_dict(b) for b in db.scalars(select(BonLivraison))]
+
+@app.put("/livraisons/{commande_id}")
+def modifier_statut(commande_id: int, s: StatutIn):
+    with Session(engine) as db:
+        bon = db.scalars(
+            select(BonLivraison).where(BonLivraison.commande_id == commande_id)
+        ).first()
+        if bon is None:
+            raise HTTPException(status_code=404, detail="Livraison introuvable")
+        bon.statut = s.statut
+        db.commit()
+        return en_dict(bon)
