@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +22,13 @@ Base.metadata.create_all(engine)
 
 app = FastAPI(title="catalogue")
 
+# AJOUT AUTHENTIFICATION : le jeton secret partagé entre les services
+JETON = os.environ.get("JETON", "secret-distrilog")
+
+def verifier_jeton(x_jeton: str | None = Header(default=None)):
+    if x_jeton != JETON:
+        raise HTTPException(status_code=401, detail="Jeton manquant ou invalide")
+
 
 class ProduitIn(BaseModel):
     sku: str
@@ -35,7 +42,7 @@ class ProduitMaj(BaseModel):
 def en_dict(p: Produit) -> dict:
     return {"sku": p.sku, "nom": p.nom, "prix": p.prix}
 
-@app.post("/produits", status_code=201)
+@app.post("/produits", status_code=201, dependencies=[Depends(verifier_jeton)])
 def creer_produit(p: ProduitIn):
     with Session(engine) as db:
         db.add(Produit(**p.model_dump()))
@@ -59,7 +66,7 @@ def lire_produit(sku: str):
         return en_dict(p)
 
 
-@app.put("/produits/{sku}")
+@app.put("/produits/{sku}", dependencies=[Depends(verifier_jeton)])
 def modifier_produit(sku: str, p: ProduitMaj):
     with Session(engine) as db:
         produit = db.get(Produit, sku)

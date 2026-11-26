@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -20,11 +20,18 @@ Base.metadata.create_all(engine)
 
 app = FastAPI(title="stock")
 
+# AJOUT AUTHENTIFICATION : le jeton secret partagé entre les services
+JETON = os.environ.get("JETON", "secret-distrilog")
+
+def verifier_jeton(x_jeton: str | None = Header(default=None)):
+    if x_jeton != JETON:
+        raise HTTPException(status_code=401, detail="Jeton manquant ou invalide")
+
 
 class Quantite(BaseModel):
     quantite: int
 
-@app.put("/stock/{sku}")
+@app.put("/stock/{sku}", dependencies=[Depends(verifier_jeton)])
 def definir_stock(sku: str, q: Quantite):
     with Session(engine) as db:
         ligne = db.get(LigneStock, sku)
@@ -43,7 +50,7 @@ def lire_stock(sku: str):
             raise HTTPException(status_code=404, detail="SKU inconnu")
         return {"sku": sku, "quantite": ligne.quantite}
 
-@app.post("/stock/{sku}/reserve")
+@app.post("/stock/{sku}/reserve", dependencies=[Depends(verifier_jeton)])
 def reserver(sku: str, q: Quantite):
     with Session(engine) as db:
         # Une seule instruction : on retire SEULEMENT s'il en reste assez

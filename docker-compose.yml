@@ -68,6 +68,7 @@ services:
         SERVICE: catalogue
     environment:
       DATABASE_URL: postgresql+psycopg://distrilog:distrilog@pg-catalogue:5432/catalogue
+      JETON: secret-distrilog
     ports:
       - "8001:8000"
     depends_on:
@@ -81,6 +82,7 @@ services:
         SERVICE: stock
     environment:
       DATABASE_URL: postgresql+psycopg://distrilog:distrilog@pg-stock:5432/stock
+      JETON: secret-distrilog
     ports:
       - "8002:8000"
     depends_on:
@@ -97,6 +99,7 @@ services:
       CATALOGUE_URL: http://catalogue:8000
       STOCK_URL: http://stock:8000
       RABBIT_HOST: rabbitmq
+      JETON: secret-distrilog
     ports:
       - "8003:8000"
     depends_on:

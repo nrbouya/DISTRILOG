@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 
 import pika
@@ -40,29 +41,36 @@ def traiter(corps: bytes):
         )
         try:
             db.commit()
-            print("Bon créé pour la commande", evenement["commande_id"])
+            print("Bon créé pour la commande", evenement["commande_id"], flush=True)
         except IntegrityError:
-            print("Message déjà traité, on l'ignore")
+            print("Message déjà traité, on l'ignore", flush=True)
+
+def au_message(ch, method, properties, body):
+    traiter(body)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
 
 def ecouter():
-    connexion = pika.BlockingConnection(pika.ConnectionParameters(RABBIT_HOST))
-    canal = connexion.channel()
-    canal.exchange_declare(
-        exchange="distrilog.events", exchange_type="topic", durable=True
-    )
-    canal.queue_declare(queue="livraison.commandes", durable=True)
-    canal.queue_bind(
-        queue="livraison.commandes",
-        exchange="distrilog.events",
-        routing_key="commande.passee",
-    )
-
-    def au_message(ch, method, properties, body):
-        traiter(body)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-
-    canal.basic_consume(queue="livraison.commandes", on_message_callback=au_message)
-    canal.start_consuming()
+    # MODIFIÉ : si RabbitMQ n'est pas prêt (ou tombe), on réessaie toutes les 3 s
+    # au lieu d'abandonner. C'était la cause du message perdu au démarrage.
+    while True:
+        try:
+            connexion = pika.BlockingConnection(pika.ConnectionParameters(RABBIT_HOST))
+            canal = connexion.channel()
+            canal.exchange_declare(
+                exchange="distrilog.events", exchange_type="topic", durable=True
+            )
+            canal.queue_declare(queue="livraison.commandes", durable=True)
+            canal.queue_bind(
+                queue="livraison.commandes",
+                exchange="distrilog.events",
+                routing_key="commande.passee",
+            )
+            canal.basic_consume(queue="livraison.commandes", on_message_callback=au_message)
+            print("Livraison : connectée à RabbitMQ, en écoute", flush=True)
+            canal.start_consuming()
+        except Exception as erreur:
+            print("Livraison : RabbitMQ indisponible, nouvel essai dans 3 s :", type(erreur).__name__, flush=True)
+            time.sleep(3)
 
 @asynccontextmanager
 async def demarrage(app):
@@ -94,4 +102,4 @@ def modifier_statut(commande_id: int, s: StatutIn):
             raise HTTPException(status_code=404, detail="Livraison introuvable")
         bon.statut = s.statut
         db.commit()
-        return en_dict(bon)
+        return en_dict(bon)
