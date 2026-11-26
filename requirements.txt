@@ -1,8 +1,8 @@
-fastapi
-uvicorn
-sqlalchemy
+fastapi 
+uvicorn 
+sqlalchemy 
 httpx
-pika
-tenacity
+pika 
+tenacity 
 pybreaker
 psycopg[binary]
